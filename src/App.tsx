@@ -168,7 +168,7 @@ function App() {
         audienceName: "Journey Rescue — High-Intent Abandoners",
         rules: settings,
         confirmSimulation: true,
-      });
+      }, crypto.randomUUID());
       setActivationRuns((current) => [result.run, ...current]);
       setError("");
     } catch (caught) {

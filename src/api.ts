@@ -120,9 +120,9 @@ export const api = {
     audienceName: string;
     rules: { asOf: string; searchDays: number; abandonDays: number; bookingDays: number };
     confirmSimulation: true;
-  }) => send<{ run: ActivationRun; message: string; liveConnection: false }>("/api/activations", {
+  }, idempotencyKey: string) => send<{ run: ActivationRun; message: string; liveConnection: false; replayed?: boolean }>("/api/activations", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input),
   }),
   suggestRules: (prompt: string, currentSettings: { asOf: string; searchDays: number; abandonDays: number; bookingDays: number }) =>
