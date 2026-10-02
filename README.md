@@ -1,4 +1,4 @@
-# Journey Rescue frontend
+# aep_journey_rescue_demo_frontend- — Journey Rescue UI
 
 React, TypeScript, and Vite user interface for the Journey Rescue demo.
 
