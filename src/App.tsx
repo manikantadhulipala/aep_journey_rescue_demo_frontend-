@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronDown, CircleHelp,
-  Database, Globe2, Layers3, MapPin, Menu, Plane, RefreshCw, Search, ShieldCheck,
+  Database, Globe2, Layers3, MapPin, Menu, Plane, RefreshCw, Search, Send, ShieldCheck,
   Sparkles, Users, X, Zap,
 } from "lucide-react";
-import { api, type AudienceResponse, type DemoSource, type JourneyEvent, type Profile } from "./api";
+import { api, type ActivationRun, type AudienceResponse, type DemoSource, type Destination, type JourneyEvent, type Profile, type RuleSuggestion } from "./api";
 
-type Page = "overview" | "audience" | "profiles" | "journey" | "sources";
+type Page = "overview" | "audience" | "activation" | "profiles" | "journey" | "sources";
 type Settings = { asOf: string; searchDays: number; abandonDays: number; bookingDays: number };
 
 const NAV: { id: Page; label: string; icon: typeof Layers3 }[] = [
   { id: "overview", label: "Overview", icon: Layers3 },
   { id: "audience", label: "Audience builder", icon: Users },
+  { id: "activation", label: "Activation", icon: Send },
   { id: "profiles", label: "Profiles", icon: BadgeCheck },
   { id: "journey", label: "Journey events", icon: Activity },
   { id: "sources", label: "Sources & schemas", icon: Database },
@@ -59,6 +60,13 @@ function App() {
   const [page, setPage] = useState<Page>("overview");
   const [settings, setSettings] = useState<Settings>(INITIAL_SETTINGS);
   const [audience, setAudience] = useState<AudienceResponse | null>(null);
+  const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [activationRuns, setActivationRuns] = useState<ActivationRun[]>([]);
+  const [selectedDestination, setSelectedDestination] = useState<Destination["id"]>("braze_mock");
+  const [activationPending, setActivationPending] = useState(false);
+  const [assistantPrompt, setAssistantPrompt] = useState("Travelers who searched and abandoned in the last 14 days, excluding anyone who booked in the last 7 days.");
+  const [suggestion, setSuggestion] = useState<RuleSuggestion | null>(null);
+  const [assistantPending, setAssistantPending] = useState(false);
   const [dashboard, setDashboard] = useState<{ profileCount: number; eventCount: number; sourceCount: number; sources: DemoSource[] } | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [events, setEvents] = useState<JourneyEvent[]>([]);
@@ -72,13 +80,15 @@ function App() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.dashboard(), api.profiles(), api.events(), api.audience(INITIAL_SETTINGS)])
-      .then(([summary, profileResponse, eventResponse, audienceResponse]) => {
+    Promise.all([api.dashboard(), api.profiles(), api.events(), api.audience(INITIAL_SETTINGS), api.destinations(), api.activations()])
+      .then(([summary, profileResponse, eventResponse, audienceResponse, destinationResponse, activationResponse]) => {
         if (!alive) return;
         setDashboard(summary);
         setProfiles(profileResponse.items);
         setEvents(eventResponse.items);
         setAudience(audienceResponse);
+        setDestinations(destinationResponse.items);
+        setActivationRuns(activationResponse.items);
         setError("");
       })
       .catch((caught: unknown) => {
@@ -137,6 +147,37 @@ function App() {
     }
   }
 
+  async function requestSuggestion() {
+    setAssistantPending(true);
+    setSuggestion(null);
+    try {
+      setSuggestion(await api.suggestRules(assistantPrompt, settings));
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Rule suggestion failed.");
+    } finally {
+      setAssistantPending(false);
+    }
+  }
+
+  async function runActivation() {
+    setActivationPending(true);
+    try {
+      const result = await api.createActivation({
+        destinationId: selectedDestination,
+        audienceName: "Journey Rescue — High-Intent Abandoners",
+        rules: settings,
+        confirmSimulation: true,
+      });
+      setActivationRuns((current) => [result.run, ...current]);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Activation simulation failed.");
+    } finally {
+      setActivationPending(false);
+    }
+  }
+
   function updateSetting(key: keyof Settings, value: string) {
     setSettings((current) => ({ ...current, [key]: key === "asOf" ? value : Math.max(1, Math.min(365, Number(value) || 1)) }));
   }
@@ -157,7 +198,7 @@ function App() {
         <button className="sandbox-switch"><span className="online-dot" /><span><strong>Journey Rescue</strong><small>DEMO SANDBOX</small></span><ChevronDown size={14} /></button>
         <div className="nav-label">ACTIVATION</div>
         <nav className="nav-list" aria-label="Main navigation">
-          {NAV.slice(0, 4).map(({ id, label, icon: Icon }) => (
+          {NAV.slice(0, 3).map(({ id, label, icon: Icon }) => (
             <button key={id} className={`nav-item ${page === id ? "active" : ""}`} onClick={() => navigate(id)}>
               <Icon size={17} strokeWidth={1.8} /><span>{label}</span>
               {id === "audience" && audience && <small>{audience.qualifiedCount}</small>}
@@ -166,7 +207,7 @@ function App() {
         </nav>
         <div className="nav-label data-nav-label">DATA MANAGEMENT</div>
         <nav className="nav-list" aria-label="Data management navigation">
-          {NAV.slice(4).map(({ id, label, icon: Icon }) => (
+          {NAV.slice(3).map(({ id, label, icon: Icon }) => (
             <button key={id} className={`nav-item ${page === id ? "active" : ""}`} onClick={() => navigate(id)}>
               <Icon size={17} strokeWidth={1.8} /><span>{label}</span>
             </button>
@@ -246,9 +287,24 @@ function App() {
               </div>
               <aside className="right-stack">
                 <article className="surface settings-surface"><div className="surface-head"><div><h3>Preview settings</h3><p>Choose evaluation anchor date</p></div><CalendarDays size={17} /></div><label className="input-label">Evaluate as of<input type="date" value={settings.asOf} onChange={(event) => updateSetting("asOf", event.target.value)} /></label><p className="helper-copy">The provided CSV events are dated in September 2026. This date reproduces the expected demo audience.</p><div className="mini-metrics"><span>Qualified profiles</span><strong>{audience?.qualifiedCount ?? "—"}</strong><span>Excluded profiles</span><strong>{audience?.excludedCount ?? "—"}</strong></div><div className="local-indicator"><i />{refreshing ? "Re-evaluating…" : "Connected to local API"}</div></article>
+                <article className="surface assistant-card"><div className="surface-head"><div><span className="overline">ASSISTED SEGMENTATION</span><h3 className="assistant-title"><Sparkles size={13} /> Draft rules from a brief</h3></div><span className="demo-ai-tag">OFFLINE DEMO</span></div><p>This deterministic sample assistant extracts travel lookback windows; it does not call an AI model.</p><textarea value={assistantPrompt} onChange={(event) => setAssistantPrompt(event.target.value)} rows={3} aria-label="Describe your travel audience" /><button className="secondary-button assistant-button" disabled={assistantPending || assistantPrompt.trim().length < 5} onClick={() => void requestSuggestion()}>{assistantPending ? <RefreshCw size={13} className="spin" /> : <Sparkles size={13} />}{assistantPending ? "Drafting…" : "Draft audience rules"}</button>{suggestion && <div className="suggestion-result">{suggestion.explanation.map((line) => <small key={line}>{line}</small>)}<button className="link-button" onClick={() => { setSettings(suggestion.rules); setSuggestion(null); }}>Apply suggested windows <ArrowRight size={13} /></button></div>}</article>
                 <article className="surface identity-card"><div className="identity-title"><span><Zap size={15} /></span><div><h3>Identity stitching</h3><p>One join key across each source</p></div></div><div className="identity-flow"><b>CRM</b><i>+</i><b>WEB</b><i>+</i><b>APP</b><ArrowRight size={14} /><code>customer_id</code></div><p>For an AEP implementation, map <code>customer_id</code> to the same identity namespace on each schema.</p></article>
                 <article className="quote-card"><Sparkles size={15} /><div><b>Interview talking point</b><p>“I joined profile attributes and timestamped journey events on a stable customer identity, then applied consent and booking suppression before creating the audience.”</p></div></article>
               </aside>
+            </div>
+          </section>
+        )}
+
+        {page === "activation" && (
+          <section className="page-content">
+            <PageTitle eyebrow="AUDIENCE ACTIVATION" title="Activation" subtitle="Preview a privacy-aware audience handoff to downstream systems." />
+            <div className="simulation-banner"><ShieldCheck size={16} /><span><b>Simulation only</b><small>No destination is connected. This stores a count-only run in PostgreSQL and sends no profiles or identifiers.</small></span></div>
+            <div className="activation-layout">
+              <div className="left-stack">
+                <article className="surface destination-surface"><div className="surface-head"><div><h3>Choose a destination</h3><p>Demo connectors illustrate the activation workflow, not live integrations.</p></div><span className="soft-tag">3 SIMULATIONS</span></div><div className="destination-list">{destinations.map((destination) => <button key={destination.id} className={`destination-option ${selectedDestination === destination.id ? "selected" : ""}`} onClick={() => setSelectedDestination(destination.id)}><span className="destination-symbol">{destination.icon}</span><span><b>{destination.name}</b><small>{destination.type} · {destination.description}</small></span><i>{selectedDestination === destination.id ? <Check size={13} /> : null}</i></button>)}</div></article>
+                <article className="surface activation-history"><div className="surface-head"><div><h3>Activation run history</h3><p>Run metadata only · no customer identifiers are stored</p></div><span className="counter">{activationRuns.length}</span></div>{activationRuns.length ? <div className="run-list">{activationRuns.map((run) => <div className="run-row" key={run.activation_id}><span className="run-status"><Check size={12} /></span><span><b>{run.destination_name}</b><small>{run.qualified_count} profiles · {new Date(run.created_at).toLocaleString()}</small></span><span className="simulated-badge">SIMULATED</span></div>)}</div> : <EmptyState title="No activation runs yet" detail="Choose a destination and simulate an audience handoff." />}</article>
+              </div>
+              <aside className="right-stack"><article className="surface activation-summary"><div className="surface-head"><div><h3>Ready to simulate?</h3><p>Current audience snapshot</p></div><Send size={15} /></div><div className="activation-count"><strong>{audience?.qualifiedCount ?? "—"}</strong><small>QUALIFIED PROFILES</small></div><div className="activation-detail"><span>Audience</span><b>Journey Rescue — High-Intent Abandoners</b><span>Destination</span><b>{destinations.find((item) => item.id === selectedDestination)?.name ?? "Loading destinations"}</b><span>Privacy</span><b>Count-only metadata · no PII</b></div><button className="primary-button activation-button" disabled={activationPending || !audience?.qualifiedCount || destinations.length === 0} onClick={() => void runActivation()}>{activationPending ? <RefreshCw size={14} className="spin" /> : <Send size={14} />}{activationPending ? "Simulating…" : "Run activation simulation"}</button><small className="activation-warning">No data is sent outside this application.</small></article><article className="quote-card"><ShieldCheck size={15} /><div><b>Production design consideration</b><p>A live connector should validate consent and identifier mappings, use idempotent jobs, and audit each handoff without logging unnecessary PII.</p></div></article></aside>
             </div>
           </section>
         )}

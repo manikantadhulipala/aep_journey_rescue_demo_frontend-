@@ -20,9 +20,13 @@ and configure the API origin through the hosting platform/reverse proxy.
 
 - Overview and live audience size.
 - Audience-rule builder with date and lookback controls.
+- Offline demo rule assistant and a count-only, simulated activation workflow.
 - Searchable profiles and profile/event inspection.
 - Unified journey event stream.
 - Data-source, identity, and XDM mapping guide.
 
 The app expects the synthetic-data backend; it does not connect to Adobe
 Experience Platform directly. Keep OAuth credentials server-side.
+
+See [INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md) for a system-design question and
+a truthful project walkthrough tailored to a CDP / Audience Builder role.

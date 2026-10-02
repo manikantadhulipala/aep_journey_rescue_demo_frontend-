@@ -51,8 +51,43 @@ export interface DemoSource {
   loaded_at: string;
 }
 
+export interface Destination {
+  id: "braze_mock" | "meta_mock" | "webhook_mock";
+  name: string;
+  type: string;
+  mode: "simulation";
+  description: string;
+  icon: string;
+}
+
+export interface ActivationRun {
+  activation_id: string;
+  audience_name: string;
+  destination_id: Destination["id"];
+  destination_name: string;
+  status: "simulated" | "failed";
+  qualified_count: number;
+  rules: { asOf: string; searchDays: number; abandonDays: number; bookingDays: number };
+  pii_transferred: false;
+  created_at: string;
+}
+
+export interface RuleSuggestion {
+  supported: true;
+  mode: "offline-demo-heuristic";
+  requiresHumanReview: true;
+  confidence: number;
+  audienceName: string;
+  rules: { asOf: string; searchDays: number; abandonDays: number; bookingDays: number };
+  explanation: string[];
+}
+
 async function request<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  return send<T>(url);
+}
+
+async function send<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
     throw new Error(body?.error ?? `API request failed (${response.status})`);
@@ -78,4 +113,22 @@ export const api = {
     request<{ profile: Profile; events: JourneyEvent[] }>(`/api/profiles/${encodeURIComponent(customerId)}`),
   events: (q = "") => request<{ items: JourneyEvent[]; total: number }>(`/api/events?${queryString({ q })}`),
   sources: () => request<{ items: DemoSource[] }>("/api/sources"),
+  destinations: () => request<{ items: Destination[]; liveConnections: false }>("/api/destinations"),
+  activations: () => request<{ items: ActivationRun[]; total: number }>("/api/activations"),
+  createActivation: (input: {
+    destinationId: Destination["id"];
+    audienceName: string;
+    rules: { asOf: string; searchDays: number; abandonDays: number; bookingDays: number };
+    confirmSimulation: true;
+  }) => send<{ run: ActivationRun; message: string; liveConnection: false }>("/api/activations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+  suggestRules: (prompt: string, currentSettings: { asOf: string; searchDays: number; abandonDays: number; bookingDays: number }) =>
+    send<RuleSuggestion>("/api/assistant/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, currentSettings }),
+    }),
 };
